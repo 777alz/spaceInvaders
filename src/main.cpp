@@ -1,3 +1,4 @@
+// include standard and opengl/glfw headers
 #include <iostream>
 #include <cstdio>
 #include <cstdint>
@@ -6,10 +7,12 @@
 
 using namespace std;
 
+// macro for handling opengl error cases
 #define GL_ERROR_CASE(glerror) \
     case glerror:              \
         snprintf(error, sizeof(error), "%s", #glerror)
 
+// function to print opengl errors with file and line info
 inline void gl_debug(const char *file, int line)
 {
     GLenum err;
@@ -40,27 +43,32 @@ inline void gl_debug(const char *file, int line)
 
 #undef GL_ERROR_CASE
 
+// callback for resizing the opengl viewport
 void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
     glViewport(0, 0, width, height);
 }
 
+// callback for glfw errors
 void error_callback(int error, const char *description)
 {
     fprintf(stderr, "Error: %s\n", description);
 }
 
+// struct for a 2d pixel buffer
 struct Buffer
 {
     size_t width, height;
     uint32_t *data;
 };
 
+// convert rgb values to uint32 color (rgba)
 uint32_t rgb_to_uint32(uint8_t r, uint8_t g, uint8_t b)
 {
     return (r << 24) | (g << 16) | (b << 8) | 255;
 }
 
+// fill the buffer with a color
 void buffer_clear(Buffer *buffer, uint32_t color)
 {
     for (size_t i = 0; i < buffer->width * buffer->height; ++i)
@@ -69,6 +77,7 @@ void buffer_clear(Buffer *buffer, uint32_t color)
     }
 }
 
+// check if opengl program linked successfully
 bool validate_program(GLuint program)
 {
     static const GLsizei BUFFER_SIZE = 512;
@@ -86,6 +95,7 @@ bool validate_program(GLuint program)
     return true;
 }
 
+// print shader compile errors if any
 void validate_shader(GLuint shader, const char *file = 0)
 {
     static const unsigned int BUFFER_SIZE = 512;
@@ -101,12 +111,14 @@ void validate_shader(GLuint shader, const char *file = 0)
     }
 }
 
+// struct for a sprite (bitmap)
 struct Sprite
 {
     size_t width, height;
     uint8_t *data;
 };
 
+// draw a sprite onto the buffer at (x, y) with a color
 void buffer_sprite_draw(
     Buffer *buffer, const Sprite &sprite,
     size_t x, size_t y, uint32_t color)
@@ -128,26 +140,26 @@ void buffer_sprite_draw(
 
 int main()
 {
-
+    // set buffer size
     const size_t buffer_width = 224;
     const size_t buffer_height = 256;
 
-    // Set the error callback before initializing GLFW
+    // set the error callback before initialising glfw
     glfwSetErrorCallback(error_callback);
-    // Initialize GLFW
+    // initialise glfw
     if (!glfwInit())
     {
-        cout << "Failed to initialize GLFW" << endl;
+        cout << "Failed to initialise GLFW" << endl;
         return -1;
     }
 
-    // Set window hints for OpenGL context
+    // set window hints for opengl context
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
-    // Create a windowed mode window and its OpenGL context
+    // create a windowed mode window and its opengl context
     GLFWwindow *window = glfwCreateWindow(2 * buffer_width, 2 * buffer_height, "Space Invaders", NULL, NULL);
     if (!window)
     {
@@ -157,10 +169,11 @@ int main()
 
     glfwMakeContextCurrent(window);
 
+    // initialise glew for opengl function loading
     GLenum err = glewInit();
     if (err != GLEW_OK)
     {
-        fprintf(stderr, "Error initializing GLEW.\n");
+        fprintf(stderr, "Error initialising GLEW.\n");
         glfwTerminate();
         return -1;
     }
@@ -171,18 +184,21 @@ int main()
 
     gl_debug(__FILE__, __LINE__);
 
+    // print opengl version and renderer info
     printf("Using OpenGL: %d.%d\n", glVersion[0], glVersion[1]);
     printf("Renderer used: %s\n", glGetString(GL_RENDERER));
     printf("Shading Language: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
 
     glClearColor(1.0, 0.0, 0.0, 1.0);
 
+    // create the main pixel buffer
     Buffer buffer;
     buffer.width = buffer_width;
     buffer.height = buffer_height;
     buffer.data = new uint32_t[buffer.width * buffer.height];
     buffer_clear(&buffer, 0);
 
+    // create opengl texture for the buffer
     GLuint buffer_texture;
     glGenTextures(1, &buffer_texture);
     glBindTexture(GL_TEXTURE_2D, buffer_texture);
@@ -195,9 +211,11 @@ int main()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
+    // create vertex array object for fullscreen triangle
     GLuint fullscreen_triangle_vao;
     glGenVertexArrays(1, &fullscreen_triangle_vao);
 
+    // vertex shader source
     const char *vertex_shader =
         "\n"
         "#version 330\n"
@@ -212,6 +230,7 @@ int main()
         "    gl_Position = vec4(2.0 * TexCoord - 1.0, 0.0, 1.0);\n"
         "}\n";
 
+    // fragment shader source
     const char *fragment_shader =
         "\n"
         "#version 330\n"
@@ -225,9 +244,10 @@ int main()
         "    outColor = texture(buffer, TexCoord).rgb;\n"
         "}\n";
 
+    // create and link opengl shader program
     GLuint shader_id = glCreateProgram();
 
-    // Create vertex shader
+    // create vertex shader
     {
         GLuint shader_vp = glCreateShader(GL_VERTEX_SHADER);
 
@@ -239,7 +259,7 @@ int main()
         glDeleteShader(shader_vp);
     }
 
-    // Create fragment shader
+    // create fragment shader
     {
         GLuint shader_fp = glCreateShader(GL_FRAGMENT_SHADER);
 
@@ -264,14 +284,16 @@ int main()
 
     glUseProgram(shader_id);
 
+    // set the texture uniform
     GLint location = glGetUniformLocation(shader_id, "buffer");
     glUniform1i(location, 0);
 
-    // OpenGL setup
+    // opengl setup
     glDisable(GL_DEPTH_TEST);
     glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(fullscreen_triangle_vao);
 
+    // create alien sprite bitmap
     Sprite alien_sprite;
     alien_sprite.width = 11;
     alien_sprite.height = 8;
@@ -286,8 +308,10 @@ int main()
         0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0  // ...@@.@@...
     };
 
+    // set clear color for buffer
     uint32_t clear_color = rgb_to_uint32(0, 128, 0);
 
+    // main loop: draw, update texture, render, poll events
     while (!glfwWindowShouldClose(window))
     {
         buffer_clear(&buffer, clear_color);
@@ -306,6 +330,7 @@ int main()
         glfwPollEvents();
     }
 
+    // cleanup opengl and memory
     glfwDestroyWindow(window);
     glfwTerminate();
 
