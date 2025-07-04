@@ -6,6 +6,40 @@
 
 using namespace std;
 
+#define GL_ERROR_CASE(glerror) \
+    case glerror:              \
+        snprintf(error, sizeof(error), "%s", #glerror)
+
+inline void gl_debug(const char *file, int line)
+{
+    GLenum err;
+    while ((err = glGetError()) != GL_NO_ERROR)
+    {
+        char error[128];
+
+        switch (err)
+        {
+            GL_ERROR_CASE(GL_INVALID_ENUM);
+            break;
+            GL_ERROR_CASE(GL_INVALID_VALUE);
+            break;
+            GL_ERROR_CASE(GL_INVALID_OPERATION);
+            break;
+            GL_ERROR_CASE(GL_INVALID_FRAMEBUFFER_OPERATION);
+            break;
+            GL_ERROR_CASE(GL_OUT_OF_MEMORY);
+            break;
+        default:
+            snprintf(error, sizeof(error), "%s", "UNKNOWN_ERROR");
+            break;
+        }
+
+        fprintf(stderr, "%s - %s: %d\n", error, file, line);
+    }
+}
+
+#undef GL_ERROR_CASE
+
 void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
     glViewport(0, 0, width, height);
@@ -67,6 +101,31 @@ void validate_shader(GLuint shader, const char *file = 0)
     }
 }
 
+struct Sprite
+{
+    size_t width, height;
+    uint8_t *data;
+};
+
+void buffer_sprite_draw(
+    Buffer *buffer, const Sprite &sprite,
+    size_t x, size_t y, uint32_t color)
+{
+    for (size_t xi = 0; xi < sprite.width; ++xi)
+    {
+        for (size_t yi = 0; yi < sprite.height; ++yi)
+        {
+            size_t sy = sprite.height - 1 + y - yi;
+            size_t sx = x + xi;
+            if (sprite.data[yi * sprite.width + xi] &&
+                sy < buffer->height && sx < buffer->width)
+            {
+                buffer->data[sy * buffer->width + sx] = color;
+            }
+        }
+    }
+}
+
 int main()
 {
 
@@ -89,12 +148,13 @@ int main()
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
     // Create a windowed mode window and its OpenGL context
-    GLFWwindow *window = glfwCreateWindow(640, 480, "Space Invaders", NULL, NULL);
+    GLFWwindow *window = glfwCreateWindow(2 * buffer_width, 2 * buffer_height, "Space Invaders", NULL, NULL);
     if (!window)
     {
         glfwTerminate();
         return -1;
     }
+
     glfwMakeContextCurrent(window);
 
     GLenum err = glewInit();
@@ -109,16 +169,19 @@ int main()
     glGetIntegerv(GL_MAJOR_VERSION, &glVersion[0]);
     glGetIntegerv(GL_MINOR_VERSION, &glVersion[1]);
 
+    gl_debug(__FILE__, __LINE__);
+
     printf("Using OpenGL: %d.%d\n", glVersion[0], glVersion[1]);
+    printf("Renderer used: %s\n", glGetString(GL_RENDERER));
+    printf("Shading Language: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
 
     glClearColor(1.0, 0.0, 0.0, 1.0);
 
-    uint32_t clear_color = rgb_to_uint32(0, 128, 0);
     Buffer buffer;
     buffer.width = buffer_width;
     buffer.height = buffer_height;
     buffer.data = new uint32_t[buffer.width * buffer.height];
-    buffer_clear(&buffer, clear_color);
+    buffer_clear(&buffer, 0);
 
     GLuint buffer_texture;
     glGenTextures(1, &buffer_texture);
@@ -204,15 +267,39 @@ int main()
     GLint location = glGetUniformLocation(shader_id, "buffer");
     glUniform1i(location, 0);
 
+    // OpenGL setup
     glDisable(GL_DEPTH_TEST);
+    glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(fullscreen_triangle_vao);
+
+    Sprite alien_sprite;
+    alien_sprite.width = 11;
+    alien_sprite.height = 8;
+    alien_sprite.data = new uint8_t[11 * 8]{
+        0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, // ..@.....@..
+        0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, // ...@...@...
+        0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, // ..@@@@@@@..
+        0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, // .@@.@@@.@@.
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // @@@@@@@@@@@
+        1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, // @.@@@@@@@.@
+        1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, // @.@.....@.@
+        0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0  // ...@@.@@...
+    };
+
+    uint32_t clear_color = rgb_to_uint32(0, 128, 0);
 
     while (!glfwWindowShouldClose(window))
     {
-        glClear(GL_COLOR_BUFFER_BIT);
+        buffer_clear(&buffer, clear_color);
 
-        // Draw the full-screen triangle again
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        buffer_sprite_draw(&buffer, alien_sprite, 112, 128, rgb_to_uint32(128, 0, 0));
+
+        glTexSubImage2D(
+            GL_TEXTURE_2D, 0, 0, 0,
+            buffer.width, buffer.height,
+            GL_RGBA, GL_UNSIGNED_INT_8_8_8_8,
+            buffer.data);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
         glfwSwapBuffers(window);
 
@@ -221,4 +308,11 @@ int main()
 
     glfwDestroyWindow(window);
     glfwTerminate();
+
+    glDeleteVertexArrays(1, &fullscreen_triangle_vao);
+
+    delete[] alien_sprite.data;
+    delete[] buffer.data;
+
+    return 0;
 }
