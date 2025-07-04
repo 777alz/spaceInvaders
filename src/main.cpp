@@ -130,6 +130,9 @@ bool validate_program(GLuint program)
     return true;
 }
 
+bool game_running = false;
+int move_dir = 0;
+
 // print shader compile errors if any
 void validate_shader(GLuint shader, const char *file = 0)
 {
@@ -166,6 +169,33 @@ void buffer_sprite_draw(
     }
 }
 
+void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
+{
+    switch (key)
+    {
+        // handle key presses
+    case GLFW_KEY_ESCAPE:
+        // exit the game if escape is pressed
+        if (action == GLFW_PRESS)
+            game_running = false;
+        break;
+    case GLFW_KEY_RIGHT:
+        if (action == GLFW_PRESS)
+            move_dir += 1;
+        else if (action == GLFW_RELEASE)
+            move_dir -= 1;
+        break;
+    case GLFW_KEY_LEFT:
+        if (action == GLFW_PRESS)
+            move_dir -= 1;
+        else if (action == GLFW_RELEASE)
+            move_dir += 1;
+        break;
+    default:
+        break;
+    }
+}
+
 int main()
 {
     // set buffer size
@@ -180,6 +210,8 @@ int main()
         cout << "Failed to initialise GLFW" << endl;
         return -1;
     }
+
+    game_running = true;
 
     // set window hints for opengl context
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -196,6 +228,9 @@ int main()
     }
 
     glfwMakeContextCurrent(window);
+
+    //
+    glfwSetKeyCallback(window, key_callback);
 
     // initialise glew for opengl function loading
     GLenum err = glewInit();
@@ -407,7 +442,7 @@ int main()
     int player_move_dir = 1;
 
     // main loop: draw, update texture, render, poll events
-    while (!glfwWindowShouldClose(window))
+    while (!glfwWindowShouldClose(window) && game_running)
     {
         buffer_clear(&buffer, clear_color);
 
@@ -445,19 +480,21 @@ int main()
         glfwSwapBuffers(window);
 
         // handle player movement
-        if (game.player.x + player_sprite.width + player_move_dir >= game.width - 1)
-        {
-            game.player.x = game.width - player_sprite.width - player_move_dir - 1;
-            player_move_dir *= -1;
-        }
-        else if ((int)game.player.x + player_move_dir <= 0)
-        {
-            game.player.x = 0;
-            player_move_dir *= -1;
-        }
-        else
-            game.player.x += player_move_dir;
+        int player_move_dir = 2 * move_dir;
 
+        if (player_move_dir != 0)
+        {
+            if (game.player.x + player_sprite.width + player_move_dir >= game.width)
+            {
+                game.player.x = game.width - player_sprite.width;
+            }
+            else if ((int)game.player.x + player_move_dir <= 0)
+            {
+                game.player.x = 0;
+            }
+            else
+                game.player.x += player_move_dir;
+        }
         glfwPollEvents();
     }
 
