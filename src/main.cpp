@@ -864,9 +864,17 @@ int main()
 
     glDeleteVertexArrays(1, &fullscreen_triangle_vao);
 
-    delete[] alien_animations[0].frames;
-    delete[] alien_animations[1].frames;
-    delete[] alien_animations[2].frames;
+    for (int i = 0; i < 3; ++i)
+        delete[] alien_animations[i].frames;
+
+    for (int i = 0; i < 6; ++i)
+        delete[] alien_sprites[i].data;
+
+    delete[] player_sprite.data;
+    delete[] alien_death_sprite.data;
+    delete[] projectile_sprite.data;
+    delete[] text_spritesheet.data;
+    delete[] death_counters;
     delete[] buffer.data;
     delete[] game.aliens;
 
