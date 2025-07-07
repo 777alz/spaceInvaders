@@ -42,3 +42,5 @@
 
 # ignore 333 folder
 333/
+#ignore build
+space.exe
