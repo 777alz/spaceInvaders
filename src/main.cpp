@@ -55,6 +55,15 @@ void error_callback(int error, const char *description)
     fprintf(stderr, "Error: %s\n", description);
 }
 
+// enum for alien types
+enum AlienType : uint8_t
+{
+    ALIEN_DEAD = 0,
+    ALIEN_TYPE_A = 1,
+    ALIEN_TYPE_B = 2,
+    ALIEN_TYPE_C = 3
+};
+
 // struct for a 2d pixel buffer
 struct Buffer
 {
@@ -80,12 +89,21 @@ struct Player
     size_t life;
 };
 
+struct Projectile
+{
+    size_t x, y;
+    int dir;
+};
+
+#define GAME_MAX_PROJECTILES 128
 struct Game
 {
     size_t width, height;
     size_t num_aliens;
+    size_t num_projectiles;
     Alien *aliens;
     Player player;
+    Projectile projectiles[GAME_MAX_PROJECTILES];
 };
 
 struct SpriteAnimation
@@ -130,8 +148,94 @@ bool validate_program(GLuint program)
     return true;
 }
 
+// global variables for game state
 bool game_running = false;
 int move_dir = 0;
+bool fire_pressed = 0;
+size_t score = 0;
+
+static const uint8_t text_spritesheet_data[65 * 35] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
+    0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0,
+    0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0,
+    1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1,
+    0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 1, 1, 1,
+    0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1,
+    1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0,
+    0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
+    0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0,
+
+    0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0,
+    0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0,
+    0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0,
+    0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0,
+    1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0,
+    0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0,
+    1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0,
+    0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0,
+    0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0,
+
+    0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0,
+    0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0,
+    0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
+    0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0,
+
+    0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1,
+    1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0,
+    0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0,
+    1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0,
+    1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+    0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0,
+    1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1,
+    0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0,
+    0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0,
+    1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1,
+    1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1,
+    1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1,
+    1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1,
+    0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0,
+    1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+    0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1, 1,
+    1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1,
+    0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0,
+    1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0,
+    1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0,
+    1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0,
+    1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1,
+    1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1,
+    1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0,
+    1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1,
+
+    0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1,
+    0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0,
+    1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0,
+    0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1,
+    0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+// check if two sprites overlap at given positions
+bool sprite_overlap_check(const Sprite &sp_a, size_t x_a, size_t y_a, const Sprite &sp_b, size_t x_b, size_t y_b)
+{
+    if (x_a < x_b + sp_b.width && x_a + sp_a.width > x_b &&
+        y_a < y_b + sp_b.height && y_a + sp_a.height > y_b)
+    {
+        return true;
+    }
+
+    return false;
+}
 
 // print shader compile errors if any
 void validate_shader(GLuint shader, const char *file = 0)
@@ -169,6 +273,56 @@ void buffer_sprite_draw(
     }
 }
 
+void buffer_draw_text(
+    Buffer *buffer,
+    const Sprite &text_spritesheet,
+    const char *text,
+    size_t x, size_t y,
+    uint32_t color)
+{
+    size_t xp = x;
+    size_t stride = text_spritesheet.width * text_spritesheet.height;
+    Sprite sprite = text_spritesheet;
+    for (const char *charp = text; *charp != '\0'; ++charp)
+    {
+        char character = *charp - 32;
+        if (character < 0 || character >= 65)
+            continue;
+
+        sprite.data = text_spritesheet.data + character * stride;
+        buffer_sprite_draw(buffer, sprite, xp, y, color);
+        xp += sprite.width + 1;
+    }
+}
+
+void buffer_draw_number(
+    Buffer *buffer,
+    const Sprite &number_spritesheet, size_t number,
+    size_t x, size_t y,
+    uint32_t color)
+{
+    uint8_t digits[64];
+    size_t num_digits = 0;
+
+    size_t current_number = number;
+    do
+    {
+        digits[num_digits++] = current_number % 10;
+        current_number = current_number / 10;
+    } while (current_number > 0);
+
+    size_t xp = x;
+    size_t stride = number_spritesheet.width * number_spritesheet.height;
+    Sprite sprite = number_spritesheet;
+    for (size_t i = 0; i < num_digits; ++i)
+    {
+        uint8_t digit = digits[num_digits - i - 1];
+        sprite.data = number_spritesheet.data + digit * stride;
+        buffer_sprite_draw(buffer, sprite, xp, y, color);
+        xp += sprite.width + 1;
+    }
+}
+
 void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
     switch (key)
@@ -191,6 +345,11 @@ void key_callback(GLFWwindow *window, int key, int scancode, int action, int mod
         else if (action == GLFW_RELEASE)
             move_dir += 1;
         break;
+    case GLFW_KEY_SPACE:
+        // fire a bullet if space is pressed
+        if (action == GLFW_RELEASE)
+            fire_pressed = true;
+        break;
     default:
         break;
     }
@@ -211,8 +370,6 @@ int main()
         return -1;
     }
 
-    game_running = true;
-
     // set window hints for opengl context
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -229,7 +386,6 @@ int main()
 
     glfwMakeContextCurrent(window);
 
-    //
     glfwSetKeyCallback(window, key_callback);
 
     // initialise glew for opengl function loading
@@ -358,10 +514,37 @@ int main()
     glfwSwapInterval(1); // enable vsync
 
     // create alien sprites bitmap
-    Sprite alien_sprite0;
-    alien_sprite0.width = 11;
-    alien_sprite0.height = 8;
-    alien_sprite0.data = new uint8_t[11 * 8]{
+    Sprite alien_sprites[6];
+
+    alien_sprites[0].width = 8;
+    alien_sprites[0].height = 8;
+    alien_sprites[0].data = new uint8_t[64]{
+        0, 0, 0, 1, 1, 0, 0, 0, // ...@@...
+        0, 0, 1, 1, 1, 1, 0, 0, // ..@@@@..
+        0, 1, 1, 1, 1, 1, 1, 0, // .@@@@@@.
+        1, 1, 0, 1, 1, 0, 1, 1, // @@.@@.@@
+        1, 1, 1, 1, 1, 1, 1, 1, // @@@@@@@@
+        0, 1, 0, 1, 1, 0, 1, 0, // .@.@@.@.
+        1, 0, 0, 0, 0, 0, 0, 1, // @......@
+        0, 1, 0, 0, 0, 0, 1, 0  // .@....@.
+    };
+
+    alien_sprites[1].width = 8;
+    alien_sprites[1].height = 8;
+    alien_sprites[1].data = new uint8_t[64]{
+        0, 0, 0, 1, 1, 0, 0, 0, // ...@@...
+        0, 0, 1, 1, 1, 1, 0, 0, // ..@@@@..
+        0, 1, 1, 1, 1, 1, 1, 0, // .@@@@@@.
+        1, 1, 0, 1, 1, 0, 1, 1, // @@.@@.@@
+        1, 1, 1, 1, 1, 1, 1, 1, // @@@@@@@@
+        0, 0, 1, 0, 0, 1, 0, 0, // ..@..@..
+        0, 1, 0, 1, 1, 0, 1, 0, // .@.@@.@.
+        1, 0, 1, 0, 0, 1, 0, 1  // @.@..@.@
+    };
+
+    alien_sprites[2].width = 11;
+    alien_sprites[2].height = 8;
+    alien_sprites[2].data = new uint8_t[88]{
         0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, // ..@.....@..
         0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, // ...@...@...
         0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, // ..@@@@@@@..
@@ -372,10 +555,9 @@ int main()
         0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0  // ...@@.@@...
     };
 
-    Sprite alien_sprite1;
-    alien_sprite1.width = 11;
-    alien_sprite1.height = 8;
-    alien_sprite1.data = new uint8_t[88]{
+    alien_sprites[3].width = 11;
+    alien_sprites[3].height = 8;
+    alien_sprites[3].data = new uint8_t[88]{
         0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, // ..@.....@..
         1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, // @..@...@..@
         1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, // @.@@@@@@@.@
@@ -385,6 +567,60 @@ int main()
         0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, // ..@.....@..
         0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0  // .@.......@.
     };
+
+    alien_sprites[4].width = 12;
+    alien_sprites[4].height = 8;
+    alien_sprites[4].data = new uint8_t[96]{
+        0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, // ....@@@@....
+        0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, // .@@@@@@@@@@.
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // @@@@@@@@@@@@
+        1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, // @@@..@@..@@@
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // @@@@@@@@@@@@
+        0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, // ...@@..@@...
+        0, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, // ..@@.@@.@@..
+        1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1  // @@........@@
+    };
+
+    alien_sprites[5].width = 12;
+    alien_sprites[5].height = 8;
+    alien_sprites[5].data = new uint8_t[96]{
+        0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, // ....@@@@....
+        0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, // .@@@@@@@@@@.
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // @@@@@@@@@@@@
+        1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, // @@@..@@..@@@
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // @@@@@@@@@@@@
+        0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, // ..@@@..@@@..
+        0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, // .@@..@@..@@.
+        0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0  // ..@@....@@..
+    };
+
+    Sprite alien_death_sprite;
+    alien_death_sprite.width = 13;
+    alien_death_sprite.height = 7;
+    alien_death_sprite.data = new uint8_t[91]{
+        0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, // .@..@...@..@.
+        0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, // ..@..@.@..@..
+        0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, // ...@.....@...
+        1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, // @@.........@@
+        0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, // ...@.....@...
+        0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, // ..@..@.@..@..
+        0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0  // .@..@...@..@.
+    };
+
+    // create alien animation with sprites above
+    SpriteAnimation alien_animations[3];
+
+    for (size_t i = 0; i < 3; ++i)
+    {
+        alien_animations[i].loop = true;
+        alien_animations[i].num_frames = 2;
+        alien_animations[i].frame_duration = 10;
+        alien_animations[i].time = 0;
+
+        alien_animations[i].frames = new Sprite *[2];
+        alien_animations[i].frames[0] = &alien_sprites[2 * i];
+        alien_animations[i].frames[1] = &alien_sprites[2 * i + 1];
+    }
 
     // initialise player sprite bitmap
     Sprite player_sprite;
@@ -400,22 +636,30 @@ int main()
         1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // @@@@@@@@@@@
     };
 
-    // create alien animation with two sprites above
-    SpriteAnimation *alien_animation = new SpriteAnimation;
+    Sprite text_spritesheet;
+    text_spritesheet.width = 5;
+    text_spritesheet.height = 7;
+    text_spritesheet.data = new uint8_t[65 * 35];
+    memcpy(text_spritesheet.data, text_spritesheet_data, sizeof(text_spritesheet_data));
 
-    alien_animation->loop = true;
-    alien_animation->num_frames = 2;
-    alien_animation->frame_duration = 10;
-    alien_animation->time = 0;
+    Sprite number_spritesheet = text_spritesheet;
+    number_spritesheet.data += 16 * 35;
 
-    alien_animation->frames = new Sprite *[2];
-    alien_animation->frames[0] = &alien_sprite0;
-    alien_animation->frames[1] = &alien_sprite1;
+    // initialise projectile sprite bitmap
+    Sprite projectile_sprite;
+    projectile_sprite.width = 1;
+    projectile_sprite.height = 3;
+    projectile_sprite.data = new uint8_t[3]{
+        1, // @
+        1, // @
+        1  // @
+    };
 
     // initialise game state and allocate aliens
     Game game;
     game.width = buffer_width;
     game.height = buffer_height;
+    game.num_projectiles = 0;
     game.num_aliens = 55;
     game.aliens = new Alien[game.num_aliens];
 
@@ -431,42 +675,98 @@ int main()
     {
         for (size_t xi = 0; xi < 11; ++xi)
         {
-            game.aliens[yi * 11 + xi].x = 16 * xi + 20;
-            game.aliens[yi * 11 + xi].y = 17 * yi + 128;
+            Alien &alien = game.aliens[yi * 11 + xi];
+            alien.type = (5 - yi) / 2 + 1;
+
+            const Sprite &sprite = alien_sprites[2 * (alien.type - 1)];
+
+            alien.x = 16 * xi + 20 + (alien_death_sprite.width - sprite.width) / 2;
+            alien.y = 17 * yi + 128;
         }
+    }
+
+    // alien death tracker
+    uint8_t *death_counters = new uint8_t[game.num_aliens];
+    for (size_t i = 0; i < game.num_aliens; ++i)
+    {
+        death_counters[i] = 10;
     }
 
     // set clear color for buffer
     uint32_t clear_color = rgb_to_uint32(0, 128, 0);
 
-    int player_move_dir = 1;
+    game_running = true;
+    int player_move_dir = 0;
 
     // main loop: draw, update texture, render, poll events
     while (!glfwWindowShouldClose(window) && game_running)
     {
         buffer_clear(&buffer, clear_color);
 
-        // draw aliens and player
-        for (size_t ai = 0; ai < game.num_aliens; ++ai)
+        // draw "SCORE"
+        buffer_draw_text(
+            &buffer,
+            text_spritesheet, "SCORE",
+            4, game.height - text_spritesheet.height - 7,
+            rgb_to_uint32(128, 0, 0));
+
+        // draw score
+        buffer_draw_number(
+            &buffer,
+            number_spritesheet, score,
+            4 + 2 * number_spritesheet.width, game.height - 2 * number_spritesheet.height - 12,
+            rgb_to_uint32(128, 0, 0));
+
+        // draw "CREDIT 00"
+        buffer_draw_text(
+            &buffer,
+            text_spritesheet, "CREDIT 00",
+            164, 7,
+            rgb_to_uint32(128, 0, 0));
+
+        for (size_t i = 0; i < game.width; ++i)
         {
-            const Alien &alien = game.aliens[ai];
-            size_t current_frame = alien_animation->time / alien_animation->frame_duration;
-            const Sprite &sprite = *alien_animation->frames[current_frame];
-            buffer_sprite_draw(&buffer, sprite, alien.x, alien.y, rgb_to_uint32(128, 0, 0));
+            buffer.data[game.width * 16 + i] = rgb_to_uint32(128, 0, 0);
         }
 
-        buffer_sprite_draw(&buffer, player_sprite, game.player.x, game.player.y, rgb_to_uint32(128, 0, 0));
-
-        // update alien animations
-        ++alien_animation->time;
-        if (alien_animation->time == alien_animation->num_frames * alien_animation->frame_duration)
+        // draw aliens
+        for (size_t ai = 0; ai < game.num_aliens; ++ai)
         {
-            if (alien_animation->loop)
-                alien_animation->time = 0;
+            if (!death_counters[ai])
+                continue;
+
+            const Alien &alien = game.aliens[ai];
+            if (alien.type == ALIEN_DEAD)
+            {
+                buffer_sprite_draw(&buffer, alien_death_sprite, alien.x, alien.y, rgb_to_uint32(128, 0, 0));
+            }
             else
             {
-                delete alien_animation;
-                alien_animation = nullptr;
+                const SpriteAnimation &animation = alien_animations[alien.type - 1];
+                size_t current_frame = animation.time / animation.frame_duration;
+                const Sprite &sprite = *animation.frames[current_frame];
+                buffer_sprite_draw(&buffer, sprite, alien.x, alien.y, rgb_to_uint32(128, 0, 0));
+            }
+        }
+
+        // draw projectiles
+        for (size_t bi = 0; bi < game.num_projectiles; ++bi)
+        {
+            const Projectile &projectile = game.projectiles[bi];
+            const Sprite &sprite = projectile_sprite;
+            buffer_sprite_draw(&buffer, sprite, projectile.x, projectile.y, rgb_to_uint32(128, 0, 0));
+        }
+
+        // draw player
+        buffer_sprite_draw(&buffer, player_sprite, game.player.x, game.player.y, rgb_to_uint32(128, 0, 0));
+
+        // update alien animations once per type
+        for (int i = 0; i < 3; ++i)
+        {
+            ++alien_animations[i].time;
+            if (alien_animations[i].time == alien_animations[i].num_frames * alien_animations[i].frame_duration)
+            {
+                alien_animations[i].time = 0;
             }
         }
 
@@ -478,6 +778,56 @@ int main()
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
         glfwSwapBuffers(window);
+
+        // update death counters for aliens
+        for (size_t ai = 0; ai < game.num_aliens; ++ai)
+        {
+            const Alien &alien = game.aliens[ai];
+            if (alien.type == ALIEN_DEAD && death_counters[ai])
+            {
+                --death_counters[ai];
+            }
+        }
+
+        // handle projectile firing
+        for (size_t bi = 0; bi < game.num_projectiles;)
+        {
+            game.projectiles[bi].y += game.projectiles[bi].dir;
+            if (game.projectiles[bi].y >= game.height ||
+                game.projectiles[bi].y < projectile_sprite.height)
+            {
+                game.projectiles[bi] = game.projectiles[game.num_projectiles - 1];
+                --game.num_projectiles;
+                continue;
+            }
+
+            // check for collisions with aliens
+            for (size_t ai = 0; ai < game.num_aliens; ++ai)
+            {
+                const Alien &alien = game.aliens[ai];
+                if (alien.type == ALIEN_DEAD)
+                    continue;
+
+                const SpriteAnimation &animation = alien_animations[alien.type - 1];
+                size_t current_frame = animation.time / animation.frame_duration;
+                const Sprite &alien_sprite = *animation.frames[current_frame];
+                bool overlap = sprite_overlap_check(
+                    projectile_sprite, game.projectiles[bi].x, game.projectiles[bi].y,
+                    alien_sprite, alien.x, alien.y);
+                if (overlap)
+                {
+                    game.aliens[ai].type = ALIEN_DEAD;
+                    // recenter death sprite
+                    game.aliens[ai].x -= (alien_death_sprite.width - alien_sprite.width) / 2;
+                    game.projectiles[bi] = game.projectiles[game.num_projectiles - 1];
+                    --game.num_projectiles;
+                    score += 10 * (4 - game.aliens[ai].type);
+                    continue;
+                }
+            }
+
+            ++bi;
+        }
 
         // handle player movement
         int player_move_dir = 2 * move_dir;
@@ -495,6 +845,16 @@ int main()
             else
                 game.player.x += player_move_dir;
         }
+
+        if (fire_pressed && game.num_projectiles < GAME_MAX_PROJECTILES)
+        {
+            game.projectiles[game.num_projectiles].x = game.player.x + player_sprite.width / 2;
+            game.projectiles[game.num_projectiles].y = game.player.y + player_sprite.height;
+            game.projectiles[game.num_projectiles].dir = 2;
+            ++game.num_projectiles;
+        }
+        fire_pressed = false;
+
         glfwPollEvents();
     }
 
@@ -504,13 +864,11 @@ int main()
 
     glDeleteVertexArrays(1, &fullscreen_triangle_vao);
 
-    delete[] alien_sprite0.data;
-    delete[] alien_sprite1.data;
-    delete[] alien_animation->frames;
+    delete[] alien_animations[0].frames;
+    delete[] alien_animations[1].frames;
+    delete[] alien_animations[2].frames;
     delete[] buffer.data;
     delete[] game.aliens;
-
-    delete alien_animation;
 
     return 0;
 }
